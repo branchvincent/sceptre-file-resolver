@@ -1,105 +1,64 @@
 version: 2.1
 
+orbs:
+  python: circleci/python@2.1.1
+
 jobs:
   build:
-    docker:
-      - image: sceptreorg/sceptre-circleci:2.1.0
-
+    executor: python/default
     steps:
       - checkout
-
-      - restore_cache:
-          key: v1-dependency-cache-{{ checksum "poetry.lock" }}
-
+      - python/install-packages:
+          pkg-manager: poetry
       - run:
-          name: Install Dependencies
-          command: poetry install
+          name: Run pre-commit
+          command: make lint
+      - run:
+          name: Build package
+          command: make dist
 
-      - save_cache:
-          key: v1-dependency-cache-{{ checksum "poetry.lock" }}
-          paths:
-            - ~/.cache/pypoetry
-
-  lint-and-unit-test:
-    docker:
-      - image: sceptreorg/sceptre-circleci:2.1.0
-
+  unit-tests:
+    parameters:
+      python:
+        type: string
+    executor:
+      name: python/default
+      tag: <<parameters.python>>
     steps:
       - checkout
-
-      - restore_cache:
-          key: v1-dependency-cache-{{ checksum "poetry.lock" }}
-
-      - run:
-          name: Install Dependencies
-          command: poetry install
-
-      - save_cache:
-          key: v1-dependency-cache-{{ checksum "poetry.lock" }}
-          paths:
-            - ~/.cache/pypoetry
-
-      - run:
-          name: Linting
-          command: |
-            . venv/bin/activate
-            make lint
-
+      - python/install-packages:
+          pkg-manager: poetry
       - run:
           name: Unit Test
-          command: |
-            . venv/bin/activate
-            mkdir test-reports
-            make test
-
+          command: make test
       - run:
           name: Coverage
-          command: |
-            . venv/bin/activate
-            make coverage
-
+          command: make coverage
       - store_test_results:
           path: test-reports
-          destination: test-reports
-
       - store_test_results:
           path: coverage.xml
-          destination: coverage-reports
-
       - store_artifacts:
           path: test-reports
           destination: test-reports
-
       - store_artifacts:
           path: coverage.xml
           destination: coverage-reports
 
   deploy-test:
-    docker:
-      - image: sceptreorg/sceptre-circleci:2.1.0
-
+    executor: python/default
     steps:
       - checkout
       - run:
-          name: Install Dependencies
-          command: poetry install
-
-      - run:
-          name: Upload to PyPi
+          name: Upload to PyPI
           command: |
             poetry config repositories.test-pypi https://test.pypi.org/legacy/
             poetry publish --build -r test-pypi -u $PYPI_TEST_USER -p $PYPI_TEST_PASSWORD
 
   deploy-production:
-    docker:
-      - image: sceptreorg/sceptre-circleci:2.1.0
-
+    executor: python/default
     steps:
       - checkout
-      - run:
-          name: Install Dependencies
-          command: poetry install
-
       - run:
           name: Upload to PyPI
           command: poetry publish --build -u $PYPI_PROD_USER -p $PYPI_PROD_PASSWORD
@@ -108,9 +67,12 @@ workflows:
   test:
     jobs:
       - build
-      - lint-and-unit-test:
+      - unit-tests:
           requires:
             - build
+          matrix:
+            parameters:
+              python: ["3.8", "3.9", "3.10", "3.11", "3.12"]
   tag:
     jobs:
       - deploy-test:
